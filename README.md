@@ -582,4 +582,129 @@ Procedure Execute(seed):
 * Refactors have declared equivalence targets (E0/E1/E2/E3) and can be regression-tested via trace/metrics.
 
 
+**As a single block**
+
+Although not recommended, it is possible to write EQC as a **single merged document** (no explicit “Block 0/1/2…” headings). The tradeoff is that you still need **section boundaries** of some kind, otherwise the spec becomes hard to lint, diff, or tool. In other words, without blocks, it becomes a mess that is hard to maintain.
+
+The practical way to “remove blocks” while keeping EQC’s guarantees is to switch from **block-based layout** to a **schema-first layout**:
+
+* A **single top-level artifact** (one file)
+* With **named sections** (or a strict key/value schema) that appear in a fixed order
+* So tooling can still find: global semantics, state, init, operators, procedure, trace, tests, equivalence, checkpointing.
+
+Below are three workable “no-block” formats.
+
+---
+
+## Option A — Single-file “Merged Spec” with mandatory section headers
+
+One file, no block numbering, but **required headings**:
+
+1. **Header & Global Semantics** (objective, ordering, numeric, environment, determinism level)
+2. **System Model** (persistent state, transient variables, invariants, constraints)
+3. **Initialization** (explicit, versioned)
+4. **Operator Manifest** (wiring table)
+5. **Operator Definitions** (the library)
+6. **Procedure** (control flow only, calls operators)
+7. **Trace & Metrics** (schema + comparability)
+8. **Validation** (lint rules, test vectors, golden traces)
+9. **Equivalence & Refactors** (E0–E3 rules, allowed changes)
+10. **Checkpoint/Restore** (format + replay guarantees)
+
+This “merges everything” into one narrative document, but keeps machine-detectable anchors.
+
+---
+
+## Option B — Schema layout (YAML/JSON-first) + embedded operator math
+
+Single artifact with a strict schema (good for tooling):
+
+* Top-level keys: `identity`, `objective`, `numeric_policy`, `ordering_policy`, `parallel_policy`, `environment_policy`, `state`, `constraints`, `init`, `manifest`, `operators`, `procedure`, `trace_schema`, `tests`, `equivalence`, `checkpointing`.
+* Each operator holds:
+
+  * signature
+  * determinism
+  * edge cases
+  * numerical notes
+  * definition (LaTeX or structured steps)
+
+This is the cleanest “merged” form for code generation and validation.
+
+---
+
+## Option C — Literate spec (Markdown) with inline schema tags
+
+One Markdown file that reads like a paper, but contains tagged anchors like:
+
+* `@objective`, `@numeric_policy`, `@ordering_policy`, `@operator`, `@procedure`, `@trace_schema`
+
+Tooling can parse tags without needing “blocks.”
+
+---
+
+# If you merge, you must keep these rules (otherwise it stops being EQC)
+
+Even without blocks, EQC only works if you keep these structural invariants:
+
+* **Global semantics must be declared before anything uses them**
+  (objective preorder, numeric policy, ordering/ties, determinism level)
+* **All randomness must still live inside operators**
+* **Persistent vs transient state must still be explicit**
+* **Initialization must still be a first-class spec component**
+* **Procedure must remain control-flow only**
+* **Trace schema must be declared and enforced**
+* **Operators must remain versioned and replaceable via manifest**
+* **Equivalence + refactor rules must remain explicit**
+
+So: you can remove “Block” labels, but you cannot remove the **semantic partitions**.
+
+---
+
+## A good merged EQC skeleton (example outline)
+
+```text
+EQC Spec: <Name>  Version: EQC-v1.x
+
+1) Header & Global Semantics
+   - objective sense + total preorder
+   - numeric policy
+   - ordering/ties policy
+   - reproducibility contract
+   - environment/dependency determinism
+
+2) System Model
+   - persistent state
+   - transient variables
+   - constraints + feasible semantics
+   - invariants/assertions
+
+3) Initialization
+   - explicit init procedure + operator versions
+
+4) Operator Manifest
+   - list operator bindings
+
+5) Operator Library
+   - operator definitions (versioned, typed, edge cases, numerical notes)
+
+6) Procedure
+   - control flow only; operator calls only; total state updates
+
+7) Observability
+   - trace schema + metric schema + comparability rule
+
+8) Validation
+   - lint rules + test vectors + golden traces
+
+9) Refactor & Equivalence
+   - E0–E3 + permitted changes
+
+10) Checkpoint/Restore
+   - required fields + serialization + replay class
+```
+
+This is “merged” (one file, one flow), but still EQC-complete.
+
+
+
 
