@@ -1,4 +1,3 @@
-```markdown
 # EquationCode (EQC) v1.1
 
 **EquationCode (EQC)** is a disciplined specification format where:
@@ -421,7 +420,7 @@ Must include:
 - Support durable evolution through explicit equivalence levels and explicit equivalence test procedures.
 - Support long-run and distributed workflows through checkpoint-restore semantics with replay guarantees.
 - Improve auditability by making the chain explicit: operators → procedure wiring → traces → outputs.
-```
+
 
 ### Example 1 — Old style (pseudocode + math “below”)
 
