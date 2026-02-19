@@ -1,4 +1,4 @@
-# EQC Spec–Implementation Bridge (EQC-SIB) v1.2
+# EQC Spec–Implementation Bridge (EQC-SIB) v1.2.1
 
 **EQC Spec–Implementation Bridge (EQC-SIB)** is the master governance layer for **code and pseudocode artifacts** that are tied to an EQC document portfolio governed by **EQC Ecosystem Specification (EQC-ES)**. It is explicitly **bidirectional** with EQC-ES:
 
@@ -13,7 +13,7 @@ EQC-SIB does **not** replace EQC-ES. EQC-ES remains the governance layer for doc
 
 * **Portfolio Name:** `[e.g., MyMetaheuristicSuite]`
 * **Purpose (1 sentence):** Single source of truth that makes every implementation artifact discoverable, deterministically hashed, and provably consistent with the governing EQC documents under bidirectional propagation.
-* **Spec Version:** **EQC-SIB-v1.2 | 2026-02-19 | [YourName / Team]**
+* **Spec Version:** **EQC-SIB-v1.2.1 | 2026-02-19 | [YourName / Team]**
 * **Paired Document Governance:** **EQC-ES-v1.9.1** is mandatory and authoritative for document governance.
 * **Governance Mode:** `paired-central` (one EQC-SIB paired to one EQC-ES root) or `paired-distributed` (sub-portfolios; see §9.2).
 
@@ -39,8 +39,8 @@ EQC-SIB defines a binding contract:
 EQC-SIB uses four change classifications:
 
 * **METADATA:** MD changes only (FD and FSD unchanged).
-* **STATE:** FSD changes while FD is unchanged (e.g., dependency pins, toolchain lock, environment profile lock changes) and the change can affect observed behavior; revalidation is required.
-* **FUNCTIONAL:** FD changes OR required evidence indicates semantic drift beyond tolerances OR public surface/operator contract changes.
+* **STATE:** FSD changes while FD is unchanged OR FD changes that are fully explained by toolchain/canonicalizer/materialization changes and evidence remains within tolerances; revalidation is required.
+* **FUNCTIONAL:** FD changes not explained by state-only causes OR required evidence indicates semantic drift beyond tolerances OR public surface/operator contract changes.
 * **VALIDATION:** Changes restricted to validation assets or traces (golden/shadow) without changing governed semantics; may still require reruns and drift reporting.
 
 For **HARD** bindings, **evidence** (traces + contracts + surfaces) participates in classification (§5.2). FD is necessary but not sufficient.
@@ -65,16 +65,50 @@ A change event’s **classification** is:
 
 Tooling MUST compute the following triggers (at minimum) and include them in output (§7.2):
 
-* `TRG_FD_CHANGED` → FUNCTIONAL
+#### FUNCTIONAL triggers (highest)
+
+* `TRG_FD_CHANGED_UNEXPLAINED` → FUNCTIONAL
 * `TRG_SD_CHANGED` → FUNCTIONAL
 * `TRG_OPERATOR_SIGNATURE_CHANGED` → FUNCTIONAL
 * `TRG_TRACE_DRIFT_EXCEEDS_TOLERANCE` (HARD) → FUNCTIONAL
 * `TRG_OBSERVED_DEPS_VIOLATION` (HARD) → FUNCTIONAL **and** validation FAIL (§3.1)
+* `TRG_SANDBOX_POLICY_VIOLATION` (HARD) → FUNCTIONAL **and** validation FAIL (§4.2)
+* `TRG_CHECKPOINT_SIGNATURE_INVALID` → FUNCTIONAL **and** validation FAIL (§9.1.3)
+
+#### STATE triggers
+
 * `TRG_PSD_CHANGED` → STATE
 * `TRG_TOOLCHAIN_LOCK_CHANGED` → STATE
 * `TRG_PROFILE_LOCK_CHANGED` → STATE
+* `TRG_GIT_MATERIALIZATION_CHANGED` → STATE
+* `TRG_CANONICALIZER_CHANGED` → STATE
+* `TRG_CANONICAL_ENCODING_RULES_CHANGED` → STATE
+* `TRG_FD_CHANGED_EXPLAINED_BY_STATE_CAUSE_AND_EVIDENCE_WITHIN_TOLERANCE` → STATE
+
+#### VALIDATION triggers
+
 * `TRG_VALIDATION_ASSET_CHANGED` (trace/test-only governed assets) → VALIDATION
+
+#### METADATA default
+
 * Otherwise if only MD changes → METADATA
+
+### 0.3.3 FD Change Root-Cause Rule (mandatory)
+
+If FD differs between two checkpoints, tooling MUST deterministically decide whether it is **explained** by STATE-only causes:
+
+STATE-only explanatory causes include one or more of:
+
+* canonicalizer identity/version/digest change
+* canonical encoding rule change (§12)
+* git materialization rule/config change (§1.1.3, §12)
+* toolchain lock change that impacts parsing/canonicalization (not the artifact’s meaning)
+
+Classification MUST be:
+
+* FUNCTIONAL if evidence drift exceeds tolerances OR surface/operator signature changed OR observed dependency enforcement fails
+* otherwise STATE if FD difference is fully explained by STATE-only causes and evidence remains within tolerances
+* otherwise FUNCTIONAL
 
 ---
 
@@ -90,9 +124,9 @@ Each registry entry MUST contain:
 * **ArtID** (unique short identifier **within PortfolioID**)
 * **GlobalArtID** (derived; see §9.2.2)
 * **Title**
-* **Type:** `pseudocode | reference-impl | production-impl | operator-impl | test-harness | golden-trace-runner | benchmark | schema | generator | derived-artifact | other`
+* **Type:** `pseudocode | reference-impl | production-impl | operator-impl | test-harness | golden-trace-runner | benchmark | schema | generator | derived-artifact | external-dependency | other`
 * **Language:** `eqc-procedure | mas-eqc | python | typescript | c++ | go | rust | other`
-* **Layer** (integer ≥ 0; see §1.5)
+* **Layer** (integer ≥ 0; see §1.5; external dependencies use §3.2)
 * **Repo / Workspace Root** (logical root)
 * **File Path / Git Ref** (one or both; see §1.1)
 * **Current Version** (`vX.Y.Z` semantic versioning)
@@ -154,18 +188,25 @@ If `Git Ref` is used, validation MUST materialize deterministically:
 
   * disabled, OR
   * recorded and included in ToolchainLockDigest.
+* Checkout MUST pin and record git normalization controls:
+
+  * `core.autocrlf`, `core.eol`, `core.filemode`
+  * sparse checkout disabled unless explicitly recorded
+  * filesystem case-sensitivity class (or run in pinned container where class is fixed)
 * Materialization MUST record:
 
   * commit hash
   * submodule commit hashes (if any)
   * LFS object digests (if any)
   * checkout strategy identifier + version (e.g., `git@2.44 sparse=false`)
+  * the normalization controls listed above (as a canonical JSON object per §12)
 
 #### 1.1.4 AllowEmpty Exception (mandatory)
 
 Some workflows intentionally include empty sentinel artifacts. To permit this:
 
 * Set `AllowEmpty: true` on the registry entry.
+* If `AllowEmpty: true`, a sidecar marker file `<artifact_path>.sibmeta` is **mandatory** (§1.2.2).
 * Empty artifacts MUST still satisfy:
 
   * path resolution
@@ -335,13 +376,54 @@ For each validation run, tooling MUST produce:
 * `declared_deps(Art)` from static extraction (imports/manifests/graph)
 * `observed_deps(Art)` from runtime observation (imports + file reads)
 
+### 3.1.1 Declared dependency classes (mandatory)
+
+Declared dependencies MUST be partitioned deterministically into:
+
+* `declared_deps_strict` (exact allowlist)
+* `declared_deps_optional` (allowed if used)
+* `declared_deps_dynamic_patterns` (allowlisted patterns)
+
+Dynamic patterns MUST be canonicalized and MUST use one of these forms:
+
+* `module:<namespace>.*` (e.g., `module:torch.*`)
+* `path:<mount>/<glob>` (e.g., `path:inputs/**`)
+* `shlib:<name-pattern>` (e.g., `shlib:libc.so.*`)
+
+### 3.1.2 Enforcement rules (mandatory)
+
 Rules:
 
-1. `observed_deps ⊆ declared_deps` MUST hold for HARD-governed artifacts (else FAIL).
-2. Layer rule (§1.5) MUST be enforced on both `declared_deps` and `observed_deps`.
+1. For HARD-governed artifacts:
+
+   `observed_deps ⊆ declared_deps_strict ∪ declared_deps_optional ∪ match(declared_deps_dynamic_patterns)`
+
+   else FAIL (`SIB_OBSERVED_DEP_UNDECLARED`) and trigger `TRG_OBSERVED_DEPS_VIOLATION`.
+
+2. Layer rule (§1.5) MUST be enforced on `declared_deps_strict`, `declared_deps_optional`, and on `observed_deps` after pattern expansion.
+
 3. Any delta MUST be reported in JSON output (§7.2) deterministically sorted (§7.4).
 
 Observed edges MUST NOT participate in cycle detection (§3.0).
+
+---
+
+## 3.2 External Dependencies (mandatory)
+
+Third-party dependencies MUST be representable in the SIB graph and pins.
+
+### 3.2.1 External dependency nodes (mandatory)
+
+External dependencies MUST be represented as nodes with:
+
+* `Type: external-dependency`
+* `GlobalArtID: <PortfolioID>::EXT::<namespace>/<name>@<version>`
+* `PinSet`: exact version and integrity digest(s) (wheel hash / npm integrity / crate checksum / module sum)
+* `Layer`: treated as Layer 0 for layering purposes unless a stricter profile policy overrides
+
+### 3.2.2 External dependency pins (mandatory)
+
+PSD computation MUST include external dependency pins and integrity digests so that dependency substitution is detectable.
 
 ---
 
@@ -357,14 +439,16 @@ Implementation validation uses one or more of:
 * **Shadow-traces per environment profile** (must match EQC-ES `environment_profiles`)
 * **Equivalence diffs** (E0–E3, plus profile drift rules)
 
+---
+
 ## 4.2 Clean-Room + Deterministic Sandbox Contract (mandatory)
 
-Shadow-traces MUST run in a clean-room workspace **and** a deterministic sandbox:
+Shadow-traces MUST run in a clean-room workspace **and** a deterministic sandbox.
 
 ### Clean-room requirements
 
 * fresh workspace directory
-* only declared inputs mounted read-only
+* only declared inputs mounted read-only (see §4.3)
 * outputs written under `./run_artifacts/<run_id>/` only
 * cache dirs cleared and cache-disabling env vars applied per profile
 * start-state must match the paired portfolio checkpoint (§9)
@@ -374,14 +458,48 @@ Shadow-traces MUST run in a clean-room workspace **and** a deterministic sandbox
 Each environment profile MUST reference a sandbox policy that enforces at minimum:
 
 * **Network:** disabled by default; allowlist only if explicitly declared and content-addressed
-* **Time:** fixed or recorded (time source deterministic for replay)
+* **Time:** `fixed` (recommended) or `recorded` (see §4.2.1)
 * **Filesystem:** deny-by-default outside declared mounts
 * **Environment:** allowlist env vars; all others cleared
 * **Locale/TZ:** pinned
 * **Threading:** pinned (OMP/MKL/BLAS/etc.)
 * **GPU determinism:** required mode or explicit waiver; nondeterministic kernels must be disallowed unless tolerated by equivalence scope
 
-If any sandbox policy requirement is missing, validation FAILS for HARD-governed artifacts.
+Validation FAILS for HARD-governed artifacts if any required control is missing (`SIB_SANDBOX_POLICY_MISSING`) or violated (`TRG_SANDBOX_POLICY_VIOLATION`).
+
+#### 4.2.1 Time determinism rule (mandatory)
+
+Sandbox time policy MUST be one of:
+
+* `fixed`: all time sources resolve to a fixed epoch value defined in the profile lock and included in trace inputs
+* `recorded`: the run must record an explicit `time_seed`/epoch and include it in trace input digests and in the run record; replay MUST reuse it
+
+---
+
+## 4.3 Content-Addressed Input Contract (mandatory)
+
+Validation runs MUST use content-addressed declared inputs.
+
+### 4.3.1 Required inputs sidecar (mandatory)
+
+Implementation root MUST include:
+
+* `sib-inputs.yaml`
+
+This file MUST declare all allowed read-only inputs for validation, including:
+
+* `input_id`
+* `path`
+* `digest` (SHA-256, lowercase hex; see §12)
+* `size_bytes`
+* `mount_point`
+* `provenance` (optional but recommended)
+* `profiles` allowlist
+
+### 4.3.2 Enforcement (mandatory)
+
+* `OBSERVED_FS_READS` MUST be within declared mounts and match declared input digests where applicable.
+* Any read outside declared mounts is validation FAIL for HARD-governed artifacts.
 
 ---
 
@@ -395,15 +513,16 @@ EQC-SIB defines a symmetric protocol. A change event is classified, then impact 
 
 ## 5.1 Change Types and Required Actions (mandatory)
 
-| Change Source       | Change Type                                                                     | Classified As | Affected                                | Required Actions                                                                                       | Version Impact (most severe wins)              |
-| ------------------- | ------------------------------------------------------------------------------- | ------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
-| Code / Pseudocode   | formatting / comments / non-functional refactor (FD stable; FSD stable)         | METADATA      | bound docs (anchor check) + dependents  | update anchors if needed; rerun validate                                                               | PATCH                                          |
-| Code / Pseudocode   | dependency pins / toolchain lock / profile lock change (FD stable; FSD changes) | STATE         | validators + dependents + traces        | rerun validations and traces; doc edits only if drift beyond tolerances                                | PATCH/MINOR (if required compat bounds change) |
-| Code / Pseudocode   | functional behavior change (FD changes)                                         | FUNCTIONAL    | bound docs + tests + traces + consumers | update docs where semantics changed; update compatibility; rerun golden/shadow traces; EQC-ES validate | MINOR (or MAJOR if breaking surface/contract)  |
-| Document            | editorial only (no EQC-ES FD change)                                            | METADATA      | bound artifacts                         | anchor checks only; no functional rebuild required                                                     | PATCH                                          |
-| Document            | functional semantic change (EQC-ES FD change)                                   | FUNCTIONAL    | bound pseudocode + code artifacts       | update pseudocode/code; rerun traces; update registry digests                                          | MINOR/MAJOR                                    |
-| Operator spec (Doc) | operator contract change                                                        | FUNCTIONAL    | operator impls + consumers + tests      | update operator code; update dependent algorithms; run targeted traces                                 | MAJOR if breaking                              |
-| Test/Trace assets   | golden trace update                                                             | VALIDATION    | validators + governed docs              | rerun validations; update drift report if within tolerance; update waivers if used                     | PATCH unless breaking                          |
+| Change Source       | Change Type                                                             | Classified As | Affected                                | Required Actions                                                                                       | Version Impact (most severe wins)              |
+| ------------------- | ----------------------------------------------------------------------- | ------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| Code / Pseudocode   | formatting / comments / non-functional refactor (FD stable; FSD stable) | METADATA      | bound docs (anchor check) + dependents  | update anchors if needed; rerun validate                                                               | PATCH                                          |
+| Code / Pseudocode   | dependency pins / toolchain lock / profile lock change (FSD changes)    | STATE         | validators + dependents + traces        | rerun validations and traces; doc edits only if drift beyond tolerances                                | PATCH/MINOR (if required compat bounds change) |
+| Code / Pseudocode   | canonicalizer/materialization change causing FD change with no drift    | STATE         | validators + dependents + traces        | rerun validations; record explanatory triggers; update lock digests                                    | PATCH                                          |
+| Code / Pseudocode   | functional behavior change (FUNCTIONAL triggers)                        | FUNCTIONAL    | bound docs + tests + traces + consumers | update docs where semantics changed; update compatibility; rerun golden/shadow traces; EQC-ES validate | MINOR (or MAJOR if breaking surface/contract)  |
+| Document            | editorial only (no EQC-ES FD change)                                    | METADATA      | bound artifacts                         | anchor checks only; no functional rebuild required                                                     | PATCH                                          |
+| Document            | functional semantic change (EQC-ES FD change)                           | FUNCTIONAL    | bound pseudocode + code artifacts       | update pseudocode/code; rerun traces; update registry digests                                          | MINOR/MAJOR                                    |
+| Operator spec (Doc) | operator contract change                                                | FUNCTIONAL    | operator impls + consumers + tests      | update operator code; update dependent algorithms; run targeted traces                                 | MAJOR if breaking                              |
+| Test/Trace assets   | golden trace update                                                     | VALIDATION    | validators + governed docs              | rerun validations; update drift report if within tolerance; update waivers if used                     | PATCH unless breaking                          |
 
 Classification MUST follow §0.3 even if the table row suggests a lower class.
 
@@ -413,11 +532,13 @@ Classification MUST follow §0.3 even if the table row suggests a lower class.
 
 For artifacts governed via **HARD** bindings, a change MUST be classified as FUNCTIONAL if **any** is true:
 
-1. **FD changes**, or
+1. `TRG_FD_CHANGED_UNEXPLAINED`, or
 2. Any bound **trace diff** exceeds effective equivalence tolerances (§8.3), or
 3. Any declared **PROVIDES surface** changes (§6.3), or
-4. Any declared **operator contract signature** changes (as defined by the governing doc/operator manifest), or
-5. Any observed-deps rule is violated (§3.1) (blocking validation error; FUNCTIONAL classification still applies for impact computation).
+4. Any declared **operator contract signature** changes, or
+5. Any observed-deps rule is violated (§3.1), or
+6. Sandbox policy is missing/violated (§4.2), or
+7. Paired checkpoint signature is invalid/missing (§9.1.3)
 
 ---
 
@@ -463,15 +584,15 @@ Tier selection, canonicalizer identity, and canonicalizer digest MUST be recorde
 
 ## 6.2 Digest Definitions (mandatory)
 
-* **FunctionalDigest FD(Art):** MUST change whenever the artifact’s **local semantics** change under its declared canonicalization tier, except where a valid waiver applies (§8.1.1). FD MAY change due to canonicalizer/tooling changes; such cases MUST be captured via ToolchainLockDigest and classified as STATE (unless evidence triggers FUNCTIONAL).
+* **FunctionalDigest FD(Art):** MUST change whenever the artifact’s **local semantics** change under its declared canonicalization tier, except where a valid waiver applies (§8.1.1). FD MAY change due to canonicalizer/materialization/encoding rule changes; such cases MUST be captured via ToolchainLockDigest / GitMaterializationDigest and classified as STATE unless evidence triggers FUNCTIONAL.
 
-* **PinSet Digest PSD(Art):** digest of the artifact’s declared dependency pins (GlobalArtID + version range or exact + required FD/FSD references, as defined in Tooling Manifest).
+* **PinSet Digest PSD(Art):** digest of the artifact’s declared dependency pins, including external dependency integrity digests (§3.2), and declared dynamic dependency patterns (§3.1.1).
 
 * **Public Surface Digest SD(Art):** digest of the declared **PROVIDES** surface list (§6.3).
 
 * **FunctionalStateDigest FSD(Art):** MUST change whenever the artifact’s effective execution state commitments change. Defined as:
 
-  `FSD(Art) = H( FD(Art) || PSD(Art) || SD(Art) || ToolchainLockDigest(profile) || ProfileLockDigest(profile) )`
+  `FSD(Art) = H( FD(Art) || PSD(Art) || SD(Art) || ToolchainLockDigest(profile) || ProfileLockDigest(profile) || GitMaterializationDigest(profile) || CanonicalEncodingRulesDigest )`
 
 * **MetadataDigest MD(Art):** may change for non-functional edits (comments, formatting not captured by tier rules, anchors, owners, references). MD MUST include anchors and REFERENCES/RECOGNIZES edges.
 
@@ -486,8 +607,6 @@ Any artifact that exposes a stable interface MUST declare a **PROVIDES surface l
 * referenced by `sib-graph.yaml` as PROVIDES edges
 * hashed as `SD(Art)`
 
-A breaking change to PROVIDES surface is **MAJOR** unless governed tolerances explicitly permit it.
-
 ### 6.3.1 Surface Manifest Rule (mandatory)
 
 The PROVIDES list MUST be machine-verifiable and MUST be authored via one of:
@@ -498,18 +617,30 @@ The PROVIDES list MUST be machine-verifiable and MUST be authored via one of:
 
 Tooling MUST fail validation if an artifact has PROVIDES edges but no valid surface manifest is resolvable.
 
+### 6.3.2 Surface diff → version impact (mandatory)
+
+Tooling MUST compute a deterministic surface diff classification:
+
+* **Removed symbol** → breaking → **MAJOR**
+* **Changed signature** → breaking → **MAJOR**
+* **Added symbol** → additive → **MINOR**
+* **Reordered surface list only** (if canonical ordering is enforced) → **PATCH** (and should not change SD)
+
+Signature canonicalization rules MUST be defined per language adapter and pinned in toolchain lock.
+
 ---
 
 ## 6.4 Toolchain Lock (mandatory)
 
 Each environment profile used for validation MUST have a **Toolchain Lock Digest** that covers, at minimum:
 
-* compiler/interpreter versions
-* build tool versions
+* compiler/interpreter versions + digests (or container image digests)
+* build tool versions + digests
 * canonicalizer version + digest
 * dependency lockfiles (or SBOM digest)
 * container image digests (if used)
-* Git materialization strategy id/version (if Git refs are used)
+* Git materialization strategy id/version and normalization controls (§1.1.3)
+* OS/runtime determinism state (see Appendix B)
 
 Toolchain lock inputs MUST be stored in a dedicated sidecar (§7).
 
@@ -524,13 +655,16 @@ EQC-SIB requires tooling that can compute impact and enforce symmetry.
 * `sib-registry.yaml`
 * `sib-graph.yaml`
 * `sib-bindings.yaml`
+* `sib-inputs.yaml`
 * `sib-validation-log.md`
 * `sib-compatibility-aggregate.yaml`
 * `sib-release-notes-template.md`
 * `sib-waivers.yaml` (see Appendix A)
 * `sib-toolchain-lock.yaml` (see Appendix B)
+* `sib-profile-lock.yaml` (profile sandbox + determinism controls; see Appendix B)
 * `sib-trust-config.yaml` (see Appendix D)
 * `sib-error-codes.yaml` (error code enum; see Appendix C)
+* `paired-checkpoint.yaml` (signed paired checkpoint; see §9.1.3)
 * `sib-schemas/` (schemas for sidecars; see Appendix E)
 
 ---
@@ -543,6 +677,18 @@ EQC-SIB requires tooling that can compute impact and enforce symmetry.
 * `eqc-sib regenerate-sidecars`
 * `eqc-sib generate-migration-plan`
 
+### 7.1.1 CLI determinism contract (mandatory)
+
+All commands MUST support:
+
+* `--profile <ENV-PROFILE-ID>` (required when multiple profiles exist)
+* `--out <path>` to write canonical JSON output (machine output MUST be written only to the specified path)
+* exit codes:
+
+  * `0` → PASS
+  * `1` → FAIL (validation errors)
+  * `2` → TOOLING ERROR (schema unreadable, internal error, crash)
+
 ---
 
 ## 7.2 JSON Output Schemas (mandatory)
@@ -551,8 +697,9 @@ EQC-SIB requires tooling that can compute impact and enforce symmetry.
 
 ```json
 {
-  "eqc_sib_version": "v1.2",
+  "eqc_sib_version": "v1.2.1",
   "workspace_ref": "<string>",
+  "profile": "<ENV-PROFILE-ID>",
   "status": "PASS|FAIL",
   "errors": [{"code":"...", "art":"GLOBAL_ART_ID", "message":"...", "doc_anchor_id":null, "art_anchor_id":null}],
   "warnings": [{"code":"...", "art":"GLOBAL_ART_ID", "message":"...", "doc_anchor_id":null, "art_anchor_id":null}],
@@ -560,11 +707,15 @@ EQC-SIB requires tooling that can compute impact and enforce symmetry.
   "resolved_sib_graph_hash": "<sha256>",
   "resolved_sib_graph_hash_basis": "DECLARED_ONLY",
   "toolchain_lock_hash": "<sha256>",
-  "profile_lock_hashes": [{"profile":"...", "hash":"<sha256>"}],
+  "profile_lock_hash": "<sha256>",
+  "git_materialization_hash": "<sha256>",
+  "canonical_encoding_rules_hash": "<sha256>",
   "broken_bindings": [{"doc":"GLOBAL_DOC_ID","art":"GLOBAL_ART_ID","doc_anchor_id":"...","art_anchor_id":"..."}],
   "waivers_used": [{"waiver_id":"...", "scope":"...", "expires":"..."}],
   "observed_deps_delta": [{"art":"GLOBAL_ART_ID","missing_declared":["..."],"unexpected_observed":["..."]}],
-  "affected_docs_via_bindings": ["GLOBAL_DOC_ID","..."]
+  "observed_fs_reads_violations": [{"art":"GLOBAL_ART_ID","reads":["..."]}],
+  "affected_docs_via_bindings": ["GLOBAL_DOC_ID","..."],
+  "checkpoint_signature": {"status":"VALID|INVALID|MISSING","trust_root_id":"...","signers":["..."],"quorum_met":true}
 }
 ```
 
@@ -588,7 +739,8 @@ EQC-SIB requires tooling that can compute impact and enforce symmetry.
       "required_actions": ["Update semantics / anchors / compatibility / traces"],
       "eqc_es_version_impact": "PATCH|MINOR|MAJOR"
     }
-  ]
+  ],
+  "impacted_profiles": ["ENV-PROFILE-ID","..."]
 }
 ```
 
@@ -611,8 +763,8 @@ All tooling output MUST be deterministic:
   * **impacts:** `(art, version_impact)`
   * **affected_docs:** `(doc)`
   * **observed deltas:** `(art)`
-
-* YAML/JSON emission MUST be canonical (sorted keys, stable float formatting if present)
+* YAML parsing MUST be normalized via YAML→canonical JSON conversion (§12)
+* JSON emission MUST be canonical (sorted keys, no insignificant whitespace, deterministic numeric encoding; §12)
 
 ---
 
@@ -623,10 +775,14 @@ All required sidecars MUST have a formal schema stored under `sib-schemas/`:
 * `sib-schemas/sib-registry.schema.json`
 * `sib-schemas/sib-graph.schema.json`
 * `sib-schemas/sib-bindings.schema.json`
+* `sib-schemas/sib-inputs.schema.json`
 * `sib-schemas/sib-waivers.schema.json`
 * `sib-schemas/sib-toolchain-lock.schema.json`
+* `sib-schemas/sib-profile-lock.schema.json`
 * `sib-schemas/sib-trust-config.schema.json`
 * `sib-schemas/sib-error-codes.schema.json`
+* `sib-schemas/paired-checkpoint.schema.json`
+* `sib-schemas/canonical-encoding.schema.json`
 
 `eqc-sib validate` MUST validate each sidecar against its schema and FAIL on schema violations.
 
@@ -690,9 +846,11 @@ A paired checkpoint snapshot includes:
 * EQC-ES: registry, graph, environment profiles, data registry, document FD/MD, resolved graph hash
 * EQC-SIB: registry, graph, bindings map, artifact FD/FSD/MD, resolved SIB graph hash
 * tool manifests and validation logs
-* waivers + toolchain lock
+* waivers + toolchain lock + profile lock
 * trust config
+* canonical encoding rules
 * a combined **Atomic Paired Checkpoint Hash**
+* signatures over the paired checkpoint object (§9.1.3)
 
 ## 9.1 Atomic Paired Checkpoint Hash (mandatory)
 
@@ -703,6 +861,9 @@ Atomic Paired Checkpoint Hash MUST include:
 * resolved graph hashes for both sides
 * bindings map hash
 * **toolchain_lock_hash**
+* **profile_lock_hash**
+* **git_materialization_hash**
+* **canonical_encoding_rules_hash**
 * **dependency lock hashes / SBOM digests**
 * canonicalizer digests / container image digests (if applicable)
 * waiver store hash (both sides)
@@ -710,13 +871,29 @@ Atomic Paired Checkpoint Hash MUST include:
 
 Detached checkpoints are invalid.
 
+### 9.1.3 Signed paired checkpoint (mandatory)
+
+Implementation root MUST include `paired-checkpoint.yaml` containing:
+
+* `portfolio_id`
+* `eqc_es_checkpoint_hash`
+* `eqc_sib_checkpoint_hash`
+* `atomic_paired_checkpoint_hash`
+* `toolchain_lock_hash`, `profile_lock_hash`, `git_materialization_hash`, `canonical_encoding_rules_hash`
+* `signing_context` (as defined in trust config policy)
+* `signatures[]` meeting required quorum from `sib-trust-config.yaml`
+
+Validation MUST fail if:
+
+* signatures are missing, invalid, revoked, expired, or quorum is not met (`TRG_CHECKPOINT_SIGNATURE_INVALID`).
+
 ---
 
 ## 9.2 Paired-Distributed Mode: Portfolio Federation Contract (mandatory)
 
 In `paired-distributed` mode:
 
-* Each sub-portfolio MUST have its own paired checkpoint (EQC-ES + EQC-SIB) with an atomic paired hash.
+* Each sub-portfolio MUST have its own paired checkpoint (EQC-ES + EQC-SIB) with an atomic paired hash and valid signatures.
 * A parent portfolio MUST reference sub-portfolios via **imported checkpoint references**, not raw paths:
 
 ```yaml
@@ -782,7 +959,7 @@ Change process (paired):
 4. run `eqc-sib validate` + `eqc-es validate`
 5. run required golden/shadow traces
 6. write release notes + migration notes if needed
-7. atomic merge with paired checkpoint recorded
+7. atomic merge with signed paired checkpoint recorded
 
 Deprecation rules align with EQC-ES:
 
@@ -798,11 +975,11 @@ Deprecation rules align with EQC-ES:
 * **Bindings Map:** `sib-bindings.yaml`, the bidirectional bridge to EQC-ES.
 * **HARD Binding:** bidirectional functional coupling with blocking enforcement.
 * **FunctionalDigest (FD):** hash of local semantics under declared canonicalization tier.
-* **FunctionalStateDigest (FSD):** hash of FD plus pins, surfaces, toolchain/profile locks.
+* **FunctionalStateDigest (FSD):** hash of FD plus pins, surfaces, toolchain/profile/materialization/encoding locks.
 * **MetadataDigest (MD):** hash for non-functional and reference/anchor metadata.
-* **PinSet:** declared dependency pins (GlobalArtIDs + version constraints + required digests).
+* **PinSet:** declared dependency pins (GlobalArtIDs + version constraints + integrity digests + allowed dynamic patterns).
 * **PROVIDES Surface:** enumerated stable API/operator surface.
-* **Paired Checkpoint:** atomic snapshot of both document and implementation portfolios.
+* **Paired Checkpoint:** atomic snapshot of both document and implementation portfolios plus signatures.
 * **Round-Trip Rule:** functional changes must propagate across doc ↔ implementation unless waived with valid evidence.
 
 ---
@@ -839,7 +1016,7 @@ waivers:
     equivalence_claim:
       minimum_equivalence: "E2"
       tolerances:
-        eps: 1e-8
+        eps: "1e-8"                   # floats MUST be strings (see §12)
         drift_budget: "..."
     evidence:
       run_ids: ["RUN-..."]
@@ -847,6 +1024,9 @@ waivers:
       profile: "ENV-PROFILE-ID"
       resolved_graph_hash: "<sha256>"
       toolchain_lock_hash: "<sha256>"
+      profile_lock_hash: "<sha256>"
+      git_materialization_hash: "<sha256>"
+      canonical_encoding_rules_hash: "<sha256>"
     signing_context:
       portfolio_id: "PORT"
       trust_root_id: "TRUSTROOT-001"
@@ -867,14 +1047,31 @@ Rules:
 
 ---
 
-## Appendix B — Toolchain Lock Schema (mandatory)
+## Appendix B — Toolchain Lock + Profile Lock Schema (mandatory)
 
-Stored in `sib-toolchain-lock.yaml`.
+Stored in `sib-toolchain-lock.yaml` and `sib-profile-lock.yaml`.
+
+### B.1 Toolchain lock (mandatory fields)
 
 ```yaml
 toolchain_lock:
   profiles:
     - profile: "ENV-PROFILE-ID"
+      os_runtime:
+        base_image: "ghcr.io/org/image:tag"
+        base_image_digest: "sha256:..."
+        kernel_version: "..."
+        libc_version: "..."
+      cpu:
+        cpu_class_id: "CPUCLASS-..."      # pinned class or explicit model snapshot
+        flags_digest: "<sha256>"          # digest of canonical flags snapshot
+      gpu:                                 # optional; required if GPU used
+        driver_version: "..."
+        cuda_runtime_digest: "<sha256 or image digest>"
+        cudnn_digest: "<sha256>"
+        determinism_flags:
+          - "CUBLAS_WORKSPACE_CONFIG=..."
+          - "torch.use_deterministic_algorithms(true)"
       interpreter:
         id: "python"
         version: "3.11.8"
@@ -884,6 +1081,9 @@ toolchain_lock:
           version: "..."
           digest: "..."
       canonicalizer:
+        id: "<tool>@<version>"
+        digest: "<sha256 or container digest>"
+      yaml_parser:
         id: "<tool>@<version>"
         digest: "<sha256 or container digest>"
       dependency_locks:
@@ -900,6 +1100,44 @@ toolchain_lock:
         strategy_id: "git-checkout-v1"
         git_version: "2.44.0"
         lfs_policy: "forbidden|allowed"
+        checkout_normalization:
+          core_autocrlf: "false"
+          core_eol: "lf"
+          core_filemode: "true"
+          sparse_checkout: "false"
+          fs_case_sensitivity: "case_sensitive|case_insensitive"
+```
+
+### B.2 Profile lock (sandbox + determinism) (mandatory)
+
+```yaml
+profile_lock:
+  profiles:
+    - profile: "ENV-PROFILE-ID"
+      sandbox:
+        network: "disabled"
+        filesystem:
+          deny_by_default: true
+          allowed_mounts:
+            - mount_point: "inputs/"
+              mode: "ro"
+            - mount_point: "run_artifacts/"
+              mode: "rw"
+        environment:
+          allowlist: ["VAR1","VAR2"]
+          clear_others: true
+        locale_tz:
+          locale: "C"
+          tz: "UTC"
+        threading:
+          omp_num_threads: 1
+          mkl_num_threads: 1
+        time_policy:
+          source: "fixed|recorded"
+          fixed_epoch: 1700000000           # required if fixed
+        gpu_policy:
+          require_determinism: true
+          allow_nondeterministic_kernels: false
 ```
 
 ---
@@ -937,6 +1175,12 @@ error_codes:
   - code: "SIB_GIT_REF_NOT_COMMIT_HASH"
     severity: "ERROR"
     description: "Git Ref is not a full commit hash."
+  - code: "SIB_CHECKPOINT_SIGNATURE_INVALID"
+    severity: "ERROR"
+    description: "Paired checkpoint signature missing/invalid or quorum not met."
+  - code: "SIB_INPUT_DIGEST_MISMATCH"
+    severity: "ERROR"
+    description: "Observed input digest differs from declared content-addressed input."
 ```
 
 ---
@@ -985,13 +1229,66 @@ Minimum required schemas:
 * `sib-registry.schema.json`
 * `sib-graph.schema.json`
 * `sib-bindings.schema.json`
+* `sib-inputs.schema.json`
 * `sib-waivers.schema.json`
 * `sib-toolchain-lock.schema.json`
+* `sib-profile-lock.schema.json`
 * `sib-trust-config.schema.json`
 * `sib-error-codes.schema.json`
+* `paired-checkpoint.schema.json`
+* `canonical-encoding.schema.json`
 
 Schema requirements:
 
 * MUST enforce Global ID form when `paired-distributed` is enabled.
+* MUST require floats to be encoded as strings where determinism matters (waivers, tolerances, etc.).
 * MUST enforce deterministic ordering constraints where representable (or require tooling normalization).
 * MUST require `AllowEmpty` only when explicitly set; default false.
+
+---
+
+# 12. Canonical Encoding Rules (mandatory)
+
+To ensure hashes are portable across implementations, **all canonical hashing inputs** MUST follow these rules.
+
+## 12.1 Digest encoding (mandatory)
+
+* SHA-256 values MUST be represented as **lowercase hex** (64 chars), no prefix.
+* Container image digests MAY preserve `sha256:` prefix where ecosystem tooling requires it; such strings MUST be treated as opaque values and included verbatim in canonical JSON after normalization.
+
+## 12.2 YAML normalization (mandatory)
+
+Sidecars are authored as YAML, but canonicalization MUST:
+
+1. parse YAML using a pinned YAML parser (declared in toolchain lock),
+2. convert to a JSON-compatible object with these constraints:
+
+   * mapping keys MUST be strings,
+   * floats MUST be represented as strings in YAML for any field that can affect determinism (schemas MUST enforce where applicable),
+3. emit canonical JSON bytes per §12.3.
+
+## 12.3 Canonical JSON bytes (mandatory)
+
+Canonical JSON bytes MUST be:
+
+* UTF-8 encoding
+* no insignificant whitespace
+* object keys sorted lexicographically (byte order of UTF-8)
+* arrays emitted in the deterministic order specified by this spec (e.g., §7.4 ordering rules)
+* numbers:
+
+  * NaN/Inf are forbidden
+  * integers emitted without leading zeros
+  * floats SHOULD be avoided in canonical objects; where unavoidable, they MUST be strings
+
+## 12.4 CanonicalEncodingRulesDigest (mandatory)
+
+Implementation root MUST include a `canonical-encoding.yaml` describing the applied encoding rules and version. Tooling MUST compute:
+
+`CanonicalEncodingRulesDigest = SHA256(canonical_json_bytes(canonical-encoding.yaml))`
+
+Changes to encoding rules MUST trigger `TRG_CANONICAL_ENCODING_RULES_CHANGED` (STATE).
+
+---
+
+ 
