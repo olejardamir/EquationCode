@@ -485,14 +485,14 @@ return x
 
 #### Block III: Operator library (short, only the key operators)
 
-**Operator:** `Schedule.CoolTemperature_v1`
+**Operator:** `Schedule.CoolTemperature`
 **Signature:** ((t\in\mathbb{N}, T0\in\mathbb{R}*{>0}) \to (T\in\mathbb{R}*{>0}))
 **Definition:**
 [
 T \leftarrow \max(EPS_TEMP,; T0/\sqrt{t+1})
 ]
 
-**Operator:** `Prob.BoltzmannPMF_v1`
+**Operator:** `Prob.BoltzmannPMF`
 **Signature:** ((S\in\mathbb{R}^d, T\in\mathbb{R}_{>0}) \to (p\in\Delta^{d-1}))
 **Numerical considerations:** stable normalization via max-subtraction
 **Definition:**
@@ -502,22 +502,22 @@ w_i \leftarrow \exp((S_i-m)/T),\quad
 p_i \leftarrow \frac{w_i}{\sum_j w_j}
 ]
 
-**Operator:** `Rand.SampleCategorical_v1`
+**Operator:** `Rand.SampleCategorical`
 **Signature:** ((p\in\Delta^{d-1}, rng_state\in\Omega)\to(i\in{0..d-1}, rng_state'\in\Omega))
 **Definition:** SAMPLE (i\sim \text{Categorical}(p)) and return updated RNG state.
 
-**Operator:** `Move.ProposeMutation_v1`
+**Operator:** `Move.ProposeMutation`
 **Signature:** ((x\in X, i\in{0..d-1}, rng_state\in\Omega)\to(x'\in X, rng_state'\in\Omega))
 **Definition:** deterministic mutation given `(x,i)` or stochastic but then must thread RNG explicitly.
 
-**Operator:** `Accept.Metropolis_v1`
+**Operator:** `Accept.Metropolis`
 **Signature:** ((f\in\mathbb{R}, f'\in\mathbb{R}, T\in\mathbb{R}_{>0}, rng_state\in\Omega)\to(accept\in{0,1}, a\in[0,1], rng_state'\in\Omega))
 **Definition:**
 [
 a \leftarrow \min(1,\exp((f'-f)/T)),\quad \text{SAMPLE }u\sim U(0,1),\quad accept \leftarrow [u<a]
 ]
 
-**Operator:** `Update.SensitivityEMA_v1`
+**Operator:** `Update.SensitivityEMA`
 **Signature:** ((S\in\mathbb{R}*{>0}^d, i\in{0..d-1}, f\in\mathbb{R}, f'\in\mathbb{R}, \alpha\in(0,1))\to(S'\in\mathbb{R}*{>0}^d))
 **Edge cases:** ensure positivity
 **Definition:**
@@ -527,7 +527,7 @@ S'_i \leftarrow \max(\varepsilon,\ (1-\alpha)S_i + \alpha\cdot signal),\quad
 S'_k \leftarrow S_k\ \forall k\neq i
 ]
 
-**Operator:** `Logging.LogIteration_v1`
+**Operator:** `Logging.LogIteration`
 **Signature:** ((trace, record)\to(trace'))
 **Definition:** append record with required fields including replay token.
 
@@ -537,35 +537,35 @@ S'_k \leftarrow S_k\ \forall k\neq i
 Procedure Execute(seed):
 
   # Block II: Initialization
-  (rng_state) ← Random.InitializePRNG_v1(seed)
-  (x, rng_state) ← Init.GenerateInitialState_v1(inputs, rng_state)
-  S ← Init.InitializeSensitivity_v1(d)
-  f ← Objective.Fitness_v1(x, inputs)
+  (rng_state) ← Random.InitializePRNG(seed)
+  (x, rng_state) ← Init.GenerateInitialState(inputs, rng_state)
+  S ← Init.InitializeSensitivity(d)
+  f ← Objective.Fitness(x, inputs)
   best_x ← x
   best_f ← f
   t ← 0
 
-  WHILE NOT Termination.Terminated_v1(state, inputs):
+  WHILE NOT Termination.Terminated(state, inputs):
 
-      T ← Schedule.CoolTemperature_v1(t, T0)
+      T ← Schedule.CoolTemperature(t, T0)
 
-      p ← Prob.BoltzmannPMF_v1(S, T)
-      (i, rng_state) ← Rand.SampleCategorical_v1(p, rng_state)
+      p ← Prob.BoltzmannPMF(S, T)
+      (i, rng_state) ← Rand.SampleCategorical(p, rng_state)
 
-      (x', rng_state) ← Move.ProposeMutation_v1(x, i, rng_state)
-      f' ← Objective.Fitness_v1(x', inputs)
+      (x', rng_state) ← Move.ProposeMutation(x, i, rng_state)
+      f' ← Objective.Fitness(x', inputs)
 
-      (accept, acc_prob, rng_state) ← Accept.Metropolis_v1(f, f', T, rng_state)
+      (accept, acc_prob, rng_state) ← Accept.Metropolis(f, f', T, rng_state)
 
       IF accept == 1:
           x ← x'
           f ← f'
 
-      S ← Update.SensitivityEMA_v1(S, i, f, f', α)
+      S ← Update.SensitivityEMA(S, i, f, f', α)
 
-      (best_x, best_f) ← ReduceBest_v1(best_x, best_f, x, f)   # uses global preorder
+      (best_x, best_f) ← ReduceBest(best_x, best_f, x, f)   # uses global preorder
 
-      trace ← Logging.LogIteration_v1(trace, {
+      trace ← Logging.LogIteration(trace, {
           t, T, i, f, f', accept, acc_prob, rng_fingerprint_t
       })
 
@@ -578,7 +578,7 @@ Procedure Execute(seed):
 
 * The skeleton is implementable and stable, but the “meaning” lives in operators.
 * Softmax stability, (T\to0) handling, NaN policy, tie-breaking, RNG threading, and acceptance semantics are all explicit and testable.
-* You can replace `Prob.BoltzmannPMF_v1` with `Prob.BoltzmannPMF_v2` (or a totally different selection policy) without rewriting the loop.
+* You can replace `Prob.BoltzmannPMF` with `Prob.BoltzmannPMF` (or a totally different selection policy) without rewriting the loop.
 * Refactors have declared equivalence targets (E0/E1/E2/E3) and can be regression-tested via trace/metrics.
 
 

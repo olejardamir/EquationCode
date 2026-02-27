@@ -101,7 +101,7 @@ Failure is a **blocking error**.
 Each sub-portfolio maintains its own complete EQC-ES-v1.9.1 file that passes `eqc-es validate`.
 Top-level EQC-ES imports sub-portfolios via `ecosystem-imports` key in the registry.
 Version constraints are AND-ed (strictest wins). Empty intersection renders the merged graph invalid.
-Diamond-dependency resolution: Root may alias (e.g. OpLib_v1.1 AS LegacyOpLib) or enforce strict single-version.
+Diamond-dependency resolution: Root may alias (e.g. OpLib.1 AS LegacyOpLib) or enforce strict single-version.
 
 ### Alias Rewrite Rule (mandatory; v1.9.1)
 
