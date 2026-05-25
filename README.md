@@ -1,4 +1,3 @@
-```markdown
 # EquationCode (EQC)
 
 EquationCode (EQC) is a structured way to describe algorithms so they stay clear, consistent, and easy to implement the same way across people, tools, and time.
@@ -117,4 +116,4 @@ EquationCode is a specification format designed for:
 - **safe evolution over time**
 
 It is especially useful when the goal is not only to implement an algorithm once, but to maintain it, improve it, and validate its behavior across versions and implementations.
-```
+
